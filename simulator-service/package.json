@@ -1,0 +1,15 @@
+{
+  "name": "simulator-service",
+  "version": "1.0.0",
+  "main": "index",
+  "license": "MIT",
+  "scripts": {
+    "dev": "nodemon --experimental-repl-await"
+  },
+  "dependencies": {
+    "amqplib": "^0.8.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.12"
+  }
+}

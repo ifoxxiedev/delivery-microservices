@@ -1,12 +1,12 @@
 const amqp = require('amqplib/callback_api')
 
-module.exports = class RabbitMQWrapper {
+class RabbitMQWrapper {
   _connection;
 
   async consume(queue, cb) {
     const ch = await this.connection.createChannel()
     ch.assertQueue(queue, { durable: true })
-    ch.prefetch(1)
+    // ch.prefetch(1)
   
     ch.consume(queue, (msg) => {
       console.log("[x] Received: %s", msg.content.toString())
@@ -21,6 +21,7 @@ module.exports = class RabbitMQWrapper {
       ch.assertQueue(queue, { durable: true })
       ch.sendToQueue(queue, Buffer.from(data))
 
+      ch.close()
       r()
     })
   }
@@ -37,9 +38,12 @@ module.exports = class RabbitMQWrapper {
   }
 
   disconnect() {
-    if (this._connection) {
-      this._connection.close()
-    }
+    return new Promise((r, j) => {
+      this.connection.close((err) => {
+        if (err) return j(err)
+        r()
+      })
+    })
   }
 
   get connection() {
@@ -60,3 +64,6 @@ module.exports = class RabbitMQWrapper {
     })
   }
 }
+
+
+module.exports = new RabbitMQWrapper()

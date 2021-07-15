@@ -1,91 +1,68 @@
 const path = require('path')
-const fs = require('fs')
-const readline = require('readline')
-const { promisify } = require('util')
+const { Worker } = require('worker_threads')
 
-const RabbitMQ = require('./queue/rabbitmq')
+const rabbitmqWrapper = require('./queue/rabbitmq')
 const processRunning = {}
 
-const rabbitMQInstance = new RabbitMQ();
+const createWorker = (order) => {
+  const worker = new Worker(path.resolve(__dirname, 'workers', 'process-order.js'), {
+    workerData: new TextEncoder().encode(JSON.stringify(order))
+  })
+  return worker;
+}
 
-process.on('SIGTERM', (err) => {
-  rabbitMQInstance.disconnect()
-  process.exit(1)
-})
 
-process.on('uncaughtException', (err) => {
-  rabbitMQInstance.disconnect()
-  process.exit(-1)
-})
+const processOrderWorker = (order, worker, { ch, msg }) => {
+  let error;
+  worker.on('message', ({ status }) => {
+    console.log('Receive message from thread children ', status)
+  })
 
-process.on('unhandledRejection', (err) => {
-  rabbitMQInstance.disconnect()
-  process.exit(-1)
-})
+  worker.on('exit', () => {
+    processRunning[order.id] = false
+    if (!error) ch.ack(msg)
+  })
 
-module.exports = (async () => {
-  try {
-    await rabbitMQInstance.connect()
-    main()
-  } catch(err) {
-    throw err
-  }
-})()
-
-const main = async () => {
-  
-  rabbitMQInstance.consume('simulator', async (msg, ch) => {
-    const order = JSON.parse(msg.content.toString('utf8'))
-    await startProcessSimulator(order, ch, msg)
+  worker.on('error', err => {
+    console.log('Thread children throw error ', err)
+    error = err
   })
 }
 
-
-const existsFilesPrm = promisify(fs.exists)
-
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
-
-const publishDst = async (order, lat, long) => {
-
-  return await rabbitMQInstance.publish('coordinates', JSON.stringify({
-    order,
-    lat,
-    long
-  }))
-}
-
-const startProcessSimulator = async (order, ch, msg) => {
-  let err;
-  
-  try {
+const startConsumer = () => {
+  rabbitmqWrapper.consume('simulator', async (msg, ch) => {
+    const order = JSON.parse(msg.content.toString('utf8'))
     if (!processRunning[order.id]) {
       processRunning[order.id] = true
+      const worker = createWorker(order)
+      processOrderWorker(order, worker, { ch, msg  })
+    } else {
+      console.log(`Cannot process order ${order.id} because this in process!`)
+    }
+  })
+}
 
-      // Read file
-      const dir = path.resolve(__dirname, 'destinations', `${order.id}.txt`)
-      const exists = existsFilesPrm(dir)
-  
-      if (exists) {     
-        const stream = fs.createReadStream(dir)
-        const rl = readline.createInterface({ input: stream, crlfDelay: Infinity })
-        for await (const line of rl) {
-          const [lat, long] = line.split(',')
-          await delay(2000)
-          await publishDst(order, lat, long)
-        }
-        await publishDst(order, 0, 0)
-      }
-      processRunning[order.id] = false
-    }
-    
-  } catch(error) {
-    err = error
-    console.log(err)
-  } finally {
-    if (!err) {
-      ch.ack(msg)
-    }
+const main = async () => {
+  try {
+    await rabbitmqWrapper.connect()
+    startConsumer()
+  } catch(err) {
+    throw err
   }
 }
 
 
+main()
+
+
+const gracefullShutdown = arg => {
+  console.log(arg)
+  const exitCode = arg instanceof Error ? -1 : 0
+  rabbitmqWrapper.disconnect().finally(() => {
+    process.exit(exitCode)
+  })
+}
+
+process.on('SIGTERM', gracefullShutdown)
+process.on('uncaughtException', gracefullShutdown)
+process.on('unhandledRejection', gracefullShutdown)

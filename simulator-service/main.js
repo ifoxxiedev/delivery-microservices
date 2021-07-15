@@ -38,6 +38,7 @@ const startConsumer = () => {
       processOrderWorker(order, worker, { ch, msg  })
     } else {
       console.log(`Cannot process order ${order.id} because this in process!`)
+      ch.ack(msg)
     }
   })
 }

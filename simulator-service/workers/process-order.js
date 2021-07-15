@@ -28,7 +28,7 @@ const readDestinations = async filePath => {
     await publishDestinations(line.split(','))
   } 
 
-  await publishDestinations(0, 0)
+  await publishDestinations([0, 0])
 }
 
 const processDestinations = async () => {
